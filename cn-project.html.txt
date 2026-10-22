@@ -1,0 +1,525 @@
+<title>Network Quality Analyser</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one instrument panel (live readouts, RTT trace, verdict) above a code walkthrough.
+   Readouts are a single ruled strip, not separate cards. Accent is a signal-cable teal; good/warn/bad are separate semantic colors. */
+:root {
+  --bg: #EDF0F3;
+  --surface: #F8FAFB;
+  --code-bg: #E4EAEF;
+  --fg: #13202B;
+  --muted: #55636F;
+  --rule: #CBD3DA;
+  --accent: #0A6C8C;
+  --accent-ink: #FFFFFF;
+  --good: #17714A;
+  --warn: #8A5A00;
+  --bad: #B3261E;
+  --font-display: 'Barlow Semi Condensed', 'Arial Narrow', system-ui, sans-serif;
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E171E;
+    --surface: #152029;
+    --code-bg: #0A1218;
+    --fg: #E4EBF0;
+    --muted: #93A3AF;
+    --rule: #2A3945;
+    --accent: #5BBFDD;
+    --accent-ink: #06222C;
+    --good: #4CC38A;
+    --warn: #E3A93B;
+    --bad: #FF8A80;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0E171E;
+  --surface: #152029;
+  --code-bg: #0A1218;
+  --fg: #E4EBF0;
+  --muted: #93A3AF;
+  --rule: #2A3945;
+  --accent: #5BBFDD;
+  --accent-ink: #06222C;
+  --good: #4CC38A;
+  --warn: #E3A93B;
+  --bad: #FF8A80;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 400 15px/1.6 var(--font-body);
+  padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.page { max-width: 920px; margin: 0 auto; display: flex; flex-direction: column; gap: 44px; }
+.page > * { min-width: 0; }
+
+.eyebrow { margin: 0 0 8px; font: 500 12px/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+h1 { margin: 0; font: 600 clamp(2.2rem, 7vw, 3.6rem)/1.02 var(--font-display); letter-spacing: -.01em; text-wrap: balance; }
+.lede { margin: 14px 0 0; max-width: 62ch; font-size: 17px; color: var(--muted); }
+
+/* instrument panel */
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+.panel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; padding: 16px 20px; }
+.panel-head > div { min-width: 0; flex: 1 1 260px; }
+.title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+h2 { margin: 0; font: 600 1.7rem/1.15 var(--font-display); letter-spacing: .005em; text-wrap: balance; }
+.panel h2 { font-size: 1.35rem; }
+.tag { font: 500 11px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); border: 1px solid var(--rule); border-radius: 999px; padding: 4px 9px; }
+.status { margin: 4px 0 0; color: var(--muted); font-size: 14px; min-height: 1.6em; }
+.btn { appearance: none; border: 2px solid var(--accent); background: var(--accent); color: var(--accent-ink); font: 600 15px/1 var(--font-body); padding: 0 22px; min-height: 44px; border-radius: 4px; cursor: pointer; }
+.btn:hover { filter: brightness(1.08); }
+.btn:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+.btn.is-running { background: transparent; color: var(--accent); }
+.bar { height: 3px; background: var(--rule); }
+.bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s linear; }
+
+.readouts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--rule); border-block: 1px solid var(--rule); }
+.cell { background: var(--surface); padding: 16px 20px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.k { font: 500 12px/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.v { font: 500 clamp(1.9rem, 5.5vw, 2.5rem)/1.1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.v i { font: 400 14px/1 var(--font-mono); font-style: normal; color: var(--muted); margin-left: 4px; }
+.s { font-size: 12.5px; color: var(--muted); }
+
+.trace { padding: 16px 20px 6px; }
+.trace-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 16px; margin-bottom: 6px; }
+.trace-head strong { font-weight: 600; font-size: 14px; }
+.trace-head span { font-size: 12.5px; color: var(--muted); }
+#trace-box { width: 100%; }
+#trace { display: block; width: 100%; }
+#trace .grid { stroke: var(--rule); stroke-width: 1; }
+#trace .tick { fill: var(--muted); font: 11px var(--font-mono); }
+#trace .line { fill: none; stroke: var(--accent); stroke-width: 1.75; stroke-linejoin: round; }
+#trace .dot { fill: var(--accent); }
+#trace .med { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 5 4; }
+#trace .lost { fill: none; stroke: var(--bad); stroke-width: 2; }
+#trace .lostline { stroke: var(--bad); stroke-opacity: .35; stroke-dasharray: 2 3; }
+.link-info { margin: 0; padding: 0 20px 14px; font-size: 12.5px; color: var(--muted); }
+
+.verdict { display: grid; grid-template-columns: minmax(150px, 210px) 1fr; gap: 24px 32px; padding: 20px; border-top: 1px solid var(--rule); }
+.score-num { font: 600 clamp(3.6rem, 12vw, 5rem)/.95 var(--font-display); font-variant-numeric: tabular-nums; }
+.score-num small { font: 400 15px/1 var(--font-mono); color: var(--muted); margin-left: 6px; }
+.grade { margin-top: 8px; font: 600 1.15rem/1.2 var(--font-display); letter-spacing: .02em; text-transform: uppercase; }
+.g-ex, .g-good { color: var(--good); }
+.g-fair { color: var(--warn); }
+.g-poor { color: var(--bad); }
+.score-note { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); }
+.uses { list-style: none; margin: 0; padding: 0; }
+.uses li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+.uses li:first-child { padding-top: 0; }
+.uses li:last-child { border-bottom: 0; padding-bottom: 0; }
+.uses li > div { min-width: 0; }
+.uses b { display: block; font-weight: 600; }
+.uses small { display: block; font: 400 12px/1.5 var(--font-mono); color: var(--muted); }
+.chip { flex: none; font: 600 12px/1 var(--font-body); border: 1px solid currentColor; border-radius: 999px; padding: 5px 10px; white-space: nowrap; }
+.chip.ok { color: var(--good); }
+.chip.mid { color: var(--warn); }
+.chip.bad { color: var(--bad); }
+.chip.wait { color: var(--muted); }
+
+/* code description */
+.doc { display: flex; flex-direction: column; gap: 18px; }
+.doc > * { min-width: 0; }
+.doc p, .doc li { max-width: 72ch; margin: 0; }
+h3 { margin: 18px 0 0; font: 600 1.1rem/1.3 var(--font-body); }
+code { font: 400 .92em var(--font-mono); background: var(--code-bg); padding: 1px 5px; border-radius: 3px; }
+pre { margin: 0; background: var(--code-bg); border: 1px solid var(--rule); border-radius: 4px; padding: 14px 16px; overflow-x: auto; font: 400 13px/1.6 var(--font-mono); tab-size: 2; white-space: pre; }
+pre code { background: none; padding: 0; font: inherit; }
+.files { display: grid; grid-template-columns: max-content 1fr; gap: 8px 22px; margin: 0; }
+.files dt { font: 500 13px/1.6 var(--font-mono); }
+.files dd { margin: 0; color: var(--muted); }
+.doc ol, .doc ul { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 8px; }
+
+@media (max-width: 680px) {
+  .readouts { grid-template-columns: repeat(2, 1fr); }
+  .verdict { grid-template-columns: 1fr; }
+  .files { grid-template-columns: 1fr; gap: 2px; }
+  .files dd { margin-bottom: 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .bar span { transition: none; } }
+</style>
+
+<div class="page">
+  <header>
+    <p class="eyebrow">Computer Networks project</p>
+    <h1>Network Quality Analyser</h1>
+    <p class="lede">Measures latency, jitter, packet loss and download speed from your browser to a Cloudflare test server, then rates the connection for browsing, video calls, streaming and gaming.</p>
+  </header>
+
+  <section class="panel" aria-labelledby="h-test">
+    <div class="panel-head">
+      <div>
+        <div class="title-row">
+          <h2 id="h-test">Live test</h2>
+          <span class="tag" id="sample-tag">Sample reading</span>
+        </div>
+        <p class="status" id="status" role="status" aria-live="polite">Showing a sample reading. Press Start to measure your own connection.</p>
+      </div>
+      <button class="btn" id="run" type="button">Start test</button>
+    </div>
+    <div class="bar" aria-hidden="true"><span id="bar"></span></div>
+
+    <div class="readouts">
+      <div class="cell"><span class="k">Latency</span><span class="v"><b id="r-lat" style="font-weight:500">—</b><i>ms</i></span><span class="s" id="s-lat">median round trip</span></div>
+      <div class="cell"><span class="k">Jitter</span><span class="v"><b id="r-jit" style="font-weight:500">—</b><i>ms</i></span><span class="s" id="s-jit">change between probes</span></div>
+      <div class="cell"><span class="k">Packet loss</span><span class="v"><b id="r-loss" style="font-weight:500">—</b><i>%</i></span><span class="s" id="s-loss">lost probes</span></div>
+      <div class="cell"><span class="k">Download</span><span class="v"><b id="r-dl" style="font-weight:500">—</b><i>Mbps</i></span><span class="s" id="s-dl">median of runs</span></div>
+    </div>
+
+    <div class="trace">
+      <div class="trace-head">
+        <strong>Round-trip time per probe</strong>
+        <span>Dots are probes, dashed line is the median, a red cross is a lost probe.</span>
+      </div>
+      <div id="trace-box"><svg id="trace" role="img" aria-label="Round-trip time per probe"></svg></div>
+    </div>
+    <p class="link-info" id="link-info" hidden></p>
+
+    <div class="verdict">
+      <div>
+        <div class="score-num"><span id="score">—</span><small>/ 100</small></div>
+        <div class="grade" id="grade">&nbsp;</div>
+        <p class="score-note">Weighted from latency, jitter, loss and speed.</p>
+      </div>
+      <ul class="uses" id="uses"></ul>
+    </div>
+  </section>
+
+  <section class="doc" aria-labelledby="h-code">
+    <h2 id="h-code">Code description</h2>
+    <p>The analyser is one HTML file with plain JavaScript and no libraries. The tests request two public Cloudflare speed-test URLs, so no support files or server of your own are needed.</p>
+    <dl class="files">
+      <dt>index.html</dt><dd>Interface, measurement code, chart and scoring. This is the only file.</dd>
+      <dt>PING_URL</dt><dd>Returns an empty response. Requesting it repeatedly gives the round-trip time.</dd>
+      <dt>PAYLOAD_URL</dt><dd>Returns 5 MB of generated bytes for the download test.</dd>
+    </dl>
+
+    <h3>How a test runs</h3>
+    <ol>
+      <li>One warm-up request opens the TCP and TLS connection, so connection setup does not inflate the first sample.</li>
+      <li>30 timed requests to <code>PING_URL</code> are sent 120 ms apart. Each has a 2 second timeout.</li>
+      <li>Latency, jitter and packet loss are calculated from those 30 results.</li>
+      <li><code>PAYLOAD_URL</code> is downloaded up to three times. A run is cut off after 10 seconds, and a slow link stops after one run.</li>
+      <li>The median download speed and the three values above are combined into a score from 0 to 100.</li>
+    </ol>
+
+    <h3>Latency (round-trip time)</h3>
+    <p>Latency is the time from sending a request to receiving the full response. It adds up propagation, transmission, queuing and processing delay. The page reports the median of the successful probes, so one slow probe does not move the result. Timing uses <code>performance.now()</code>, which has sub-millisecond resolution. A probe that returns null was lost.</p>
+    <pre><code id="code-probe"></code></pre>
+
+    <h3>Jitter</h3>
+    <p>Jitter is the variation in delay, mostly caused by queuing at routers. The page uses the mean absolute difference between consecutive round-trip times: <code>jitter = sum(|RTT[i] - RTT[i-1]|) / (n - 1)</code>. RFC 3550 uses a smoothed version of the same idea for RTP voice and video streams.</p>
+    <pre><code id="code-jitter"></code></pre>
+
+    <h3>Packet loss</h3>
+    <p>A browser cannot send raw packets, so loss is counted per request. A probe is lost when it times out after 2 seconds or returns an HTTP error. The formula is <code>loss % = lost probes / probes sent * 100</code>.</p>
+
+    <h3>Download speed</h3>
+    <p>Speed is the number of bits received divided by the time taken: <code>Mbps = bytes * 8 / seconds / 1,000,000</code>. The clock starts when the first chunk arrives, so latency is not counted as transfer time. Progress is read chunk by chunk from the response stream, which drives the live number during the test.</p>
+    <pre><code id="code-download"></code></pre>
+
+    <h3>Quality score</h3>
+    <p>Each measurement is mapped to a value between 0 and 1 using a best and a worst limit, then weighted: latency 30%, jitter 20%, packet loss 25%, download speed 25%. Speed uses a log scale because going from 1 to 10 Mbps matters more than going from 91 to 100. The chips beside the score compare your numbers with the limits printed under each use. A use is Suitable when every limit is met, Marginal when the worst value is within 50% of its limit, and Not suitable beyond that.</p>
+    <pre><code id="code-score"></code></pre>
+
+    <h3>Limits of the method</h3>
+    <ul>
+      <li>It measures the path to Cloudflare's test server over HTTPS (TCP, TLS and HTTP), not an ICMP ping. Browsers cannot send ICMP or raw packets.</li>
+      <li>TCP retransmits lost packets, so request-level loss reads lower than loss measured with UDP or ICMP.</li>
+      <li>Speed comes from a single connection, so it can be lower than a multi-connection speed test.</li>
+      <li>Results change with Wi-Fi signal, other devices on the network and VPNs. Run the test a few times.</li>
+    </ul>
+
+    <h3>Extending the project</h3>
+    <p>A small server in Python or Node would add what a browser cannot do: an upload test, a UDP loss test and traceroute. Saving each result with a timestamp would give a history chart.</p>
+  </section>
+</div>
+
+<script>
+const PROBES = 30, GAP_MS = 120, TIMEOUT_MS = 2000, DL_RUNS = 3, MAX_DL_MS = 10000;
+// Public Cloudflare speed-test endpoints (they allow cross-origin requests).
+// To test against your own server instead, point these at a tiny file and a ~5 MB file you host.
+const PING_URL = 'https://speed.cloudflare.com/__down?bytes=0';
+const PAYLOAD_URL = 'https://speed.cloudflare.com/__down?bytes=5000000';
+
+async function probeOnce(url, timeoutMs) {
+  // One timed request. Returns the round-trip time in ms, or null if the probe was lost.
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  const t0 = performance.now();
+  try {
+    const res = await fetch(url, { cache: 'no-store', signal: ctl.signal });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    await res.arrayBuffer();
+    return performance.now() - t0;
+  } catch (e) {
+    return null; // timeout or HTTP error counts as a lost probe
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function median(values) {
+  const s = [...values].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+function jitter(rtts) {
+  // Mean absolute difference between consecutive round-trip times.
+  if (rtts.length < 2) return 0;
+  let sum = 0;
+  for (let i = 1; i < rtts.length; i++) sum += Math.abs(rtts[i] - rtts[i - 1]);
+  return sum / (rtts.length - 1);
+}
+
+async function downloadOnce(url, onTick) {
+  // Streams the payload and returns throughput in Mbit/s.
+  const ctl = new AbortController();
+  const res = await fetch(url, { cache: 'no-store', signal: ctl.signal });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const reader = res.body.getReader();
+  let bytes = 0, tFirst = 0, tLast = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      const now = performance.now();
+      if (done) break;
+      if (!tFirst) { tFirst = now; continue; } // start the clock at the first byte
+      bytes += value.length;
+      tLast = now;
+      onTick(bytes * 8 / ((now - tFirst) / 1000) / 1e6);
+      if (now - tFirst > MAX_DL_MS) { ctl.abort(); break; } // slow link: stop early
+    }
+  } catch (e) { /* aborted */ }
+  if (!tLast || tLast === tFirst) throw new Error('No data received');
+  return bytes * 8 / ((tLast - tFirst) / 1000) / 1e6;
+}
+
+const clamp01 = x => Math.max(0, Math.min(1, x));
+
+function score(m) {
+  const sLat = 1 - clamp01((m.lat - 20) / 280);              // 1 at 20 ms or less, 0 at 300 ms
+  const sJit = 1 - clamp01((m.jit - 5) / 45);                // 1 at 5 ms or less, 0 at 50 ms
+  const sLoss = 1 - clamp01(m.loss / 5);                     // 1 at 0 %, 0 at 5 % or more
+  const sSpd = clamp01(Math.log10(Math.max(m.mbps, 1)) / 2); // 0 at 1 Mbps, 1 at 100 Mbps
+  return Math.round(100 * (0.30 * sLat + 0.20 * sJit + 0.25 * sLoss + 0.25 * sSpd));
+}
+
+const USES = [
+  { name: 'Web browsing',  mbps: 3,  lat: 300, jit: 100, loss: 3 },
+  { name: 'Video calls',   mbps: 5,  lat: 150, jit: 30,  loss: 1 },
+  { name: 'HD streaming',  mbps: 10, lat: 200, jit: 50,  loss: 2 },
+  { name: 'Online gaming', mbps: 3,  lat: 60,  jit: 20,  loss: 1 }
+];
+
+function fit(u, m, mbps) {
+  const worst = Math.max(m.lat / u.lat, m.jit / u.jit, m.loss / u.loss, u.mbps / mbps);
+  return worst <= 1 ? 'ok' : worst <= 1.5 ? 'mid' : 'bad';
+}
+
+// ---- interface -------------------------------------------------------------
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let running = false, cancel = false, lastSamples = [];
+
+function summarize(samples) {
+  const ok = samples.filter(v => v !== null);
+  const sent = samples.length, lost = sent - ok.length;
+  return {
+    sent, lost, loss: sent ? lost / sent * 100 : 0,
+    lat: ok.length ? median(ok) : null,
+    min: ok.length ? Math.min(...ok) : null,
+    max: ok.length ? Math.max(...ok) : null,
+    jit: jitter(ok)
+  };
+}
+
+function fmt(n, d) { return n === null || n === undefined ? '—' : n.toFixed(d); }
+function setStatus(t) { $('status').textContent = t; }
+function setProgress(f) { $('bar').style.width = (f * 100).toFixed(0) + '%'; }
+
+function setDl(mbps, note) {
+  $('r-dl').textContent = mbps === null ? '—' : fmt(mbps, mbps >= 100 ? 0 : 1);
+  $('s-dl').textContent = note;
+}
+
+function showReadouts(m) {
+  if (!m || m.sent === 0) {
+    ['r-lat', 'r-jit', 'r-loss'].forEach(id => { $(id).textContent = '—'; });
+    $('s-lat').textContent = 'median round trip';
+    $('s-jit').textContent = 'change between probes';
+    $('s-loss').textContent = 'lost probes';
+    return;
+  }
+  $('r-lat').textContent = fmt(m.lat, 0);
+  $('s-lat').textContent = m.lat === null ? 'no replies yet' : 'min ' + fmt(m.min, 0) + ' · max ' + fmt(m.max, 0) + ' ms';
+  $('r-jit').textContent = fmt(m.jit, 1);
+  $('s-jit').textContent = 'mean change between probes';
+  $('r-loss').textContent = fmt(m.loss, 1);
+  $('s-loss').textContent = m.lost + ' of ' + m.sent + ' probes';
+}
+
+function niceCeil(x) {
+  const steps = [20, 50, 100, 200, 500, 1000, 2000, 5000];
+  return steps.find(s => s >= x) || Math.ceil(x / 1000) * 1000;
+}
+
+function renderTrace(s) {
+  lastSamples = s;
+  const W = Math.max(280, Math.floor($('trace-box').clientWidth || 640));
+  const H = W < 480 ? 190 : 230;
+  const L = 58, R = 12, T = 14, B = 26, pw = W - L - R, ph = H - T - B;
+  const ok = s.filter(v => v !== null);
+  const top = niceCeil(Math.max(20, ...ok) * 1.1);
+  const x = i => L + (i / (PROBES - 1)) * pw;
+  const y = v => T + ph - (v / top) * ph;
+  let out = '';
+  [0, top / 2, top].forEach((t, k) => {
+    out += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(t).toFixed(1) + '" y2="' + y(t).toFixed(1) + '"/>' +
+      '<text class="tick" x="' + (L - 8) + '" y="' + (y(t) + 4).toFixed(1) + '" text-anchor="end">' + t + (k === 2 ? ' ms' : '') + '</text>';
+  });
+  if (ok.length > 1) {
+    const my = y(median(ok)).toFixed(1);
+    out += '<line class="med" x1="' + L + '" x2="' + (W - R) + '" y1="' + my + '" y2="' + my + '"/>';
+  }
+  let d = '', pen = false;
+  s.forEach((v, i) => {
+    if (v === null) { pen = false; return; }
+    d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1);
+    pen = true;
+  });
+  out += '<path class="line" d="' + d + '"/>';
+  s.forEach((v, i) => {
+    if (v === null) {
+      const cx = x(i), cy = T + 8;
+      out += '<line class="lostline" x1="' + cx.toFixed(1) + '" x2="' + cx.toFixed(1) + '" y1="' + T + '" y2="' + (T + ph) + '"/>' +
+        '<path class="lost" d="M' + (cx - 4).toFixed(1) + ' ' + (cy - 4) + 'l8 8M' + (cx - 4).toFixed(1) + ' ' + (cy + 4) + 'l8 -8"/>';
+    } else {
+      out += '<circle class="dot" cx="' + x(i).toFixed(1) + '" cy="' + y(v).toFixed(1) + '" r="2.6"/>';
+    }
+  });
+  out += '<text class="tick" x="' + L + '" y="' + (H - 6) + '">probe 1</text>' +
+    '<text class="tick" x="' + (W - R) + '" y="' + (H - 6) + '" text-anchor="end">' + PROBES + '</text>';
+  const svg = $('trace');
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.setAttribute('height', H);
+  svg.setAttribute('aria-label', ok.length
+    ? 'Round-trip time per probe, median ' + median(ok).toFixed(0) + ' milliseconds, ' + (s.length - ok.length) + ' lost'
+    : 'Round-trip time per probe, no data yet');
+  svg.innerHTML = out;
+}
+
+function clearVerdict() {
+  $('score').textContent = '—';
+  const g = $('grade'); g.textContent = 'Measuring'; g.className = 'grade';
+  $('uses').innerHTML = USES.map(u =>
+    '<li><div><b>' + u.name + '</b><small>' + needText(u) + '</small></div><span class="chip wait">Pending</span></li>').join('');
+}
+
+function needText(u) {
+  return '≥ ' + u.mbps + ' Mbps · ≤ ' + u.lat + ' ms · jitter ≤ ' + u.jit + ' ms · loss ≤ ' + u.loss + '%';
+}
+
+function showVerdict(m, mbps) {
+  const sc = score({ lat: m.lat, jit: m.jit, loss: m.loss, mbps });
+  const grade = sc >= 85 ? ['Excellent', 'g-ex'] : sc >= 70 ? ['Good', 'g-good'] : sc >= 50 ? ['Fair', 'g-fair'] : ['Poor', 'g-poor'];
+  $('score').textContent = sc;
+  const g = $('grade'); g.textContent = grade[0]; g.className = 'grade ' + grade[1];
+  const label = { ok: 'Suitable', mid: 'Marginal', bad: 'Not suitable' };
+  $('uses').innerHTML = USES.map(u => {
+    const f = fit(u, m, mbps);
+    return '<li><div><b>' + u.name + '</b><small>' + needText(u) + '</small></div><span class="chip ' + f + '">' + label[f] + '</span></li>';
+  }).join('');
+  return grade[0];
+}
+
+function setRunning(on) {
+  const b = $('run');
+  b.textContent = on ? 'Stop' : 'Run again';
+  b.classList.toggle('is-running', on);
+}
+
+async function runTest() {
+  if (running) { cancel = true; setStatus('Stopping…'); return; }
+  running = true; cancel = false;
+  const samples = [];
+  setRunning(true);
+  $('sample-tag').hidden = true;
+  showReadouts(null); setDl(null, 'median of runs'); clearVerdict(); renderTrace(samples); setProgress(0);
+  const total = PROBES + DL_RUNS;
+  try {
+    setStatus('Opening connection…');
+    await probeOnce(PING_URL, TIMEOUT_MS); // warm-up, not recorded
+    for (let i = 0; i < PROBES && !cancel; i++) {
+      setStatus('Latency: probe ' + (i + 1) + ' of ' + PROBES);
+      samples.push(await probeOnce(PING_URL, TIMEOUT_MS));
+      renderTrace(samples); showReadouts(summarize(samples)); setProgress((i + 1) / total);
+      await sleep(GAP_MS);
+    }
+    const m = summarize(samples);
+    if (cancel) { setStatus('Stopped. Partial results are shown.'); return; }
+    if (m.lat === null) { setStatus('No reply from the test server. Check your connection and try again.'); return; }
+
+    const runs = [];
+    for (let r = 0; r < DL_RUNS && !cancel; r++) {
+      setStatus('Download: run ' + (r + 1) + ' of ' + DL_RUNS);
+      try {
+        const mbps = await downloadOnce(PAYLOAD_URL, v => setDl(v, 'run ' + (r + 1) + ' of ' + DL_RUNS + ', live'));
+        runs.push(mbps);
+        setDl(median(runs), 'median of ' + runs.length + (runs.length === 1 ? ' run' : ' runs'));
+        setProgress((PROBES + r + 1) / total);
+        if (mbps < 5) break; // slow link: one run is enough
+      } catch (e) { break; }
+    }
+    if (cancel) { setStatus('Stopped. Partial results are shown.'); return; }
+    if (!runs.length) { setDl(null, 'download failed'); setStatus('The download test failed. Latency results are shown.'); return; }
+    const verdict = showVerdict(m, median(runs));
+    setStatus('Done. This connection rates ' + verdict.toLowerCase() + '.');
+  } catch (e) {
+    setStatus('The test could not finish. Try again.');
+  } finally {
+    running = false; setRunning(false); setProgress(0);
+  }
+}
+
+// ---- sample reading shown before the first run --------------------------------
+function sampleRtts() {
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  return Array.from({ length: PROBES }, (_, i) =>
+    i === 17 ? null : Math.round((36 + rnd() * 10 + (i % 9 === 4 ? 14 : 0)) * 10) / 10);
+}
+
+function init() {
+  [['code-probe', probeOnce], ['code-jitter', jitter], ['code-download', downloadOnce], ['code-score', score]]
+    .forEach(p => { $(p[0]).textContent = p[1].toString(); });
+
+  const s = sampleRtts(), m = summarize(s);
+  renderTrace(s); showReadouts(m); setDl(87.4, 'sample, median of 3 runs'); showVerdict(m, 87.4);
+
+  const c = navigator.connection;
+  if (c && (c.effectiveType || c.downlink || c.rtt)) {
+    const parts = [];
+    if (c.effectiveType) parts.push(c.effectiveType + ' link');
+    if (c.downlink) parts.push(c.downlink + ' Mbps downlink');
+    if (c.rtt) parts.push(c.rtt + ' ms RTT');
+    $('link-info').textContent = 'Your browser reports: ' + parts.join(' · ') + '.';
+    $('link-info').hidden = false;
+  }
+  $('run').addEventListener('click', runTest);
+  if (window.ResizeObserver) new ResizeObserver(() => renderTrace(lastSamples)).observe($('trace-box'));
+}
+init();
+</script>
